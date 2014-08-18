@@ -1,0 +1,136 @@
+#!/bin/bash
+ 
+# =================================================================================
+#
+# Description
+#       This script will look for items on Craigslist for you and send you an email
+#   with links when an item has been found.
+#
+#
+# Version History
+#   1.0 Initial
+#
+# =================================================================================
+ 
+# this will capture result of curl search query
+touch curl_search_results 
+ 
+# this will store old results to compare to for finding new hits
+master_file=/Users/rue/unix_scripts/master
+ 
+# this will store search terms to query
+keys=/Users/rue/unix_scripts/keys
+ 
+i=1
+while :
+do
+    #clear out search and url strings
+    tmpsearch=""
+    url=""
+ 
+    #read search term file and build one long search string
+    while read line
+    do
+        tmpsearch="$tmpsearch|\"$line\""
+            tmpsearch=$(echo $tmpsearch | sed '$s/ /+/g')
+    done < $keys
+ 
+    echo $tmpsearch
+ 
+    #remove first | character at beginning of line
+    search=$(echo $tmpsearch | sed '$s/^|//g')
+ 
+    echo search=$search
+ 
+    url="http://sfbay.craigslist.org/search/zip/sfc?query=$search&srchType=A&minAsk=&maxAsk="
+    echo "$url"
+ 
+    #check if master file exists"
+    if [ -f $master_file ]
+    then
+        #echo file exists
+ 
+        echo "executing curl"
+        curl $url &> /Users/rue/unix_scripts/curl_search_results.tmp
+        cat /Users/rue/unix_scripts/curl_search_results.tmp | grep -i "\- <a href" > /Users/rue/unix_scripts/curl_search_results
+ 
+        echo "finsihed executing curl"
+ 
+        #check for new hits
+        `grep -vf $master_file /Users/rue/unix_scripts/curl_search_results > /Users/rue/unix_scripts/new`
+        lines=`wc -l /Users/rue/unix_scripts/new | awk '{ print $1 }'`  # lines will = 0 if no new entry is found
+ 
+        if [ $lines -ne 0 ] # then it means a new entry has been found
+        then
+            echo  "new item found"
+            cp curl_search_results $master_file
+            if [ -s $master_file ]  # if not empty...
+            then
+                sed 's/">/ "> /g' /Users/rue/unix_scripts/new > /Users/rue/unix_scripts/new.tmp
+                lines=`wc -l /Users/rue/unix_scripts/new.tmp | awk '{print $1}'`  # lines will = 0 if no new entry is found
+ 
+                #clear
+                echo "Number of items found: $lines"
+                timestamp=`date '+%h-%d %H:%M:%S'`
+                mail -s "$timestamp New $search found" <email-redacted>  < /Users/rue/unix_scripts/new.tmp
+                rm /Users/rue/unix_scripts/new.tmp
+                echo  "email sent"
+            else
+                echo "empty file, not sending email"
+            fi
+        else
+            echo  "nothing found"
+        fi
+    else
+        #file does not exist.  creating new master file"
+        curl $url &> /Users/rue/unix_scripts/master.tmp
+        cat /Users/rue/unix_scripts/master.tmp | grep -i "\- <a href" > /Users/rue/unix_scripts/master
+ 
+        lines=`wc -l $master_file | awk '{print $1}'`  # lines will = 0 if no new entry is found
+ 
+        #clear
+        echo "Number of items found: $lines"
+        if [ $lines -ne 0 ] # then it means a new entry has been found
+        then
+            #echo  "\a"
+            echo  "new item found"
+            sed 's/">/ ">/g' $master_file > $master_file.tmp
+            timestamp=`date '+%h-%d %H:%M:%S'`
+            mail -s "$timestamp New $search found" <email-redacted>  < $master_file.tmp
+            rm $master_file.tmp
+            echo  "email sent"
+        fi
+    fi
+ 
+    # check if there is a sleep_time file
+    if [ -f /Users/rue/unix_scripts/sleep_time ]
+    then
+        sleep_time=$(cat sleep_time)
+        if [ "$sleep_time" = "" ]
+        then
+                        echo "sleep_time file empty. Setting to 30"
+            sleep_time=30
+            echo "30" > /Users/rue/unix_scripts/sleep_time
+        fi
+    else
+                echo "no sleep time file found. creating new file with 30 seconds."
+        echo "30" > /Users/rue/unix_scripts/sleep_time
+        sleep_time=30
+    fi
+ 
+    echo "sleep time: $sleep_time ================================="
+    while :
+    do
+        if [ $i -ne $sleep_time ]
+        then
+            #echo -n "$i,"
+            echo  "$i,\c"
+            i=`expr $i + 1`
+        else
+            echo "$i"
+            i=1
+            break
+        fi
+        sleep 1
+    done
+done
